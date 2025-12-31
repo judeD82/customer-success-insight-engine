@@ -13,31 +13,71 @@ from logic import (
     generate_email_draft,
 )
 
-# -----------------------------
+# --------------------------------------------------
 # PAGE CONFIG
-# -----------------------------
+# --------------------------------------------------
 st.set_page_config(
     page_title="Customer Health Control Room",
-    layout="wide"
+    layout="wide",
 )
 
 st.title("🚦 Customer Health Control Room")
 st.caption("Operational dashboard for Customer Success teams")
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-df = pd.read_csv("customers.csv")
-
-# Compute health for all customers
-df[["health_score", "status", "reasons"]] = df.apply(
-    lambda row: pd.Series(calculate_health(row)),
-    axis=1
+# --------------------------------------------------
+# CSV UPLOAD
+# --------------------------------------------------
+uploaded_file = st.file_uploader(
+    "Upload customer data (.csv)",
+    type=["csv"],
 )
 
-# -----------------------------
+if not uploaded_file:
+    st.info("Please upload a customer CSV file to begin.")
+    st.stop()
+
+# --------------------------------------------------
+# LOAD & VALIDATE CSV
+# --------------------------------------------------
+try:
+    df = pd.read_csv(uploaded_file)
+except Exception as e:
+    st.error("Unable to read CSV file.")
+    st.code(str(e))
+    st.stop()
+
+REQUIRED_COLUMNS = [
+    "customer_name",
+    "usage_per_week",
+    "open_tickets",
+    "nps",
+    "days_since_login",
+    "contract_age_months",
+    "usage_prev_period",
+    "open_tickets_prev_period",
+    "nps_prev_period",
+    "renewal_date",
+    "contract_value",
+]
+
+missing_columns = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+
+if missing_columns:
+    st.error("CSV is missing required columns:")
+    st.write(missing_columns)
+    st.stop()
+
+# --------------------------------------------------
+# CALCULATE HEALTH FOR ALL CUSTOMERS
+# --------------------------------------------------
+df[["health_score", "status", "reasons"]] = df.apply(
+    lambda row: pd.Series(calculate_health(row)),
+    axis=1,
+)
+
+# --------------------------------------------------
 # KPI ROW
-# -----------------------------
+# --------------------------------------------------
 k1, k2, k3, k4 = st.columns(4)
 
 k1.metric("Healthy", len(df[df["status"] == "Green"]))
@@ -47,28 +87,33 @@ k4.metric("Avg Health Score", round(df["health_score"].mean(), 1))
 
 st.divider()
 
-# -----------------------------
+# --------------------------------------------------
 # SIDEBAR FILTERS
-# -----------------------------
+# --------------------------------------------------
 st.sidebar.header("Filters")
+
 status_filter = st.sidebar.multiselect(
     "Health status",
     ["Green", "Amber", "Red"],
-    default=["Green", "Amber", "Red"]
+    default=["Green", "Amber", "Red"],
 )
 
 filtered_df = df[df["status"].isin(status_filter)]
 
-# -----------------------------
+if filtered_df.empty:
+    st.warning("No customers match the selected filters.")
+    st.stop()
+
+# --------------------------------------------------
 # MAIN LAYOUT
-# -----------------------------
+# --------------------------------------------------
 left, right = st.columns([1, 2])
 
 with left:
     st.subheader("Customers")
     selected_customer = st.radio(
         "",
-        filtered_df["customer_name"].tolist()
+        filtered_df["customer_name"].tolist(),
     )
 
 customer = df[df["customer_name"] == selected_customer].iloc[0]
@@ -87,9 +132,9 @@ with right:
     st.write(f"Days since last login: {customer['days_since_login']}")
     st.write(f"Contract age (months): {customer['contract_age_months']}")
 
-    # -----------------------------
+    # --------------------------------------------------
     # TRENDS
-    # -----------------------------
+    # --------------------------------------------------
     trends = calculate_trends(customer)
 
     st.markdown("### Trends vs Previous Period")
@@ -97,9 +142,9 @@ with right:
     st.write(f"Ticket change: {trends['tickets']:+}")
     st.write(f"NPS change: {trends['nps']:+}")
 
-    # -----------------------------
+    # --------------------------------------------------
     # RENEWAL & ACTIONS
-    # -----------------------------
+    # --------------------------------------------------
     renewal_days = days_to_renewal(customer)
     renewal_status = renewal_risk_flag(customer, customer["health_score"])
 
@@ -107,15 +152,22 @@ with right:
     st.write(f"Days to renewal: {renewal_days}")
     st.warning(renewal_status)
 
-    actions = recommend_actions(customer, customer["health_score"], renewal_days)
+    actions = recommend_actions(
+        customer,
+        customer["health_score"],
+        renewal_days,
+    )
 
     st.markdown("### Recommended Next Actions")
-    for action in actions:
-        st.success(action)
+    if actions:
+        for action in actions:
+            st.success(action)
+    else:
+        st.info("No immediate actions recommended.")
 
-    # -----------------------------
-    # CLIENT REPORT
-    # -----------------------------
+    # --------------------------------------------------
+    # CLIENT-FACING REPORT
+    # --------------------------------------------------
     st.divider()
     st.subheader("📄 Client-Facing Summary")
 
@@ -149,7 +201,14 @@ with right:
         mime="image/png",
     )
 
-    # Email draft
+    # --------------------------------------------------
+    # CLIENT EMAIL DRAFT
+    # --------------------------------------------------
     st.subheader("📧 Client Email Draft")
+
     email_text = generate_email_draft(customer, summary)
-    st.text_area("Copy into email client:", email_text, height=260)
+    st.text_area(
+        "Copy into email client:",
+        email_text,
+        height=260,
+    )
