@@ -29,7 +29,7 @@ st.caption("Operational dashboard for Customer Success teams")
 
 
 # --------------------------------------------------
-# DATA SOURCE SELECTION
+# DATA SOURCE
 # --------------------------------------------------
 st.subheader("Data Source")
 
@@ -77,11 +77,11 @@ REQUIRED_COLUMNS = [
     "contract_value",
 ]
 
-missing_columns = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
 
-if missing_columns:
-    st.error("The following required columns are missing from the dataset:")
-    st.write(missing_columns)
+if missing:
+    st.error("The following required columns are missing:")
+    st.write(missing)
     st.stop()
 
 
@@ -193,8 +193,13 @@ with right:
     st.divider()
     st.subheader("📄 Client-Facing Summary")
 
-    summary = generate_client_summary(customer, customer["health_score"])
-    st.write(summary)
+    summary = generate_client_summary(
+        customer,
+        customer["health_score"],
+        trends,
+        renewal_days,
+    )
+    st.markdown(summary)
 
     # Chart
     fig, ax = plt.subplots()
@@ -224,7 +229,7 @@ with right:
     )
 
     # --------------------------------------------------
-    # CLIENT EMAIL DRAFT
+    # CLIENT EMAIL
     # --------------------------------------------------
     st.subheader("📧 Client Email Draft")
 
