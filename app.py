@@ -13,6 +13,9 @@ from logic import (
     generate_email_draft,
 )
 
+from sample_data import generate_sample_data
+
+
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
@@ -24,28 +27,42 @@ st.set_page_config(
 st.title("🚦 Customer Health Control Room")
 st.caption("Operational dashboard for Customer Success teams")
 
+
 # --------------------------------------------------
-# CSV UPLOAD
+# DATA SOURCE SELECTION
 # --------------------------------------------------
-uploaded_file = st.file_uploader(
-    "Upload customer data (.csv)",
-    type=["csv"],
+st.subheader("Data Source")
+
+data_mode = st.radio(
+    "Choose how to load customer data:",
+    ["Upload CSV", "Use sample data"],
 )
 
-if not uploaded_file:
-    st.info("Please upload a customer CSV file to begin.")
-    st.stop()
+if data_mode == "Upload CSV":
+    uploaded_file = st.file_uploader(
+        "Upload customer data (.csv)",
+        type=["csv"],
+    )
+
+    if not uploaded_file:
+        st.info("Please upload a customer CSV file to begin.")
+        st.stop()
+
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error("Unable to read CSV file.")
+        st.code(str(e))
+        st.stop()
+
+else:
+    df = generate_sample_data()
+    st.success("Sample customer data loaded.")
+
 
 # --------------------------------------------------
-# LOAD & VALIDATE CSV
+# SCHEMA VALIDATION
 # --------------------------------------------------
-try:
-    df = pd.read_csv(uploaded_file)
-except Exception as e:
-    st.error("Unable to read CSV file.")
-    st.code(str(e))
-    st.stop()
-
 REQUIRED_COLUMNS = [
     "customer_name",
     "usage_per_week",
@@ -63,17 +80,19 @@ REQUIRED_COLUMNS = [
 missing_columns = [c for c in REQUIRED_COLUMNS if c not in df.columns]
 
 if missing_columns:
-    st.error("CSV is missing required columns:")
+    st.error("The following required columns are missing from the dataset:")
     st.write(missing_columns)
     st.stop()
 
+
 # --------------------------------------------------
-# CALCULATE HEALTH FOR ALL CUSTOMERS
+# HEALTH CALCULATION
 # --------------------------------------------------
 df[["health_score", "status", "reasons"]] = df.apply(
     lambda row: pd.Series(calculate_health(row)),
     axis=1,
 )
+
 
 # --------------------------------------------------
 # KPI ROW
@@ -86,6 +105,7 @@ k3.metric("Critical", len(df[df["status"] == "Red"]))
 k4.metric("Avg Health Score", round(df["health_score"].mean(), 1))
 
 st.divider()
+
 
 # --------------------------------------------------
 # SIDEBAR FILTERS
@@ -104,6 +124,7 @@ if filtered_df.empty:
     st.warning("No customers match the selected filters.")
     st.stop()
 
+
 # --------------------------------------------------
 # MAIN LAYOUT
 # --------------------------------------------------
@@ -117,6 +138,7 @@ with left:
     )
 
 customer = df[df["customer_name"] == selected_customer].iloc[0]
+
 
 with right:
     st.subheader(f"Customer Overview: {selected_customer}")
