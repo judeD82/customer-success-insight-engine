@@ -2,10 +2,10 @@ import pandas as pd
 from datetime import date, timedelta
 import random
 
-def generate_sample_data(num_customers=6):
-    customers = []
 
+def generate_sample_data(num_customers=6):
     base_date = date.today()
+    customers = []
 
     for i in range(num_customers):
         usage = random.randint(0, 6)
