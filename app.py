@@ -1,241 +1,157 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-from io import BytesIO
+import plotly.express as px
 
 from logic import (
     calculate_health,
     calculate_trends,
     days_to_renewal,
-    renewal_risk_flag,
+    renewal_flag,
     recommend_actions,
     generate_client_summary,
     generate_email_draft,
 )
-
 from sample_data import generate_sample_data
 
 
 # --------------------------------------------------
-# PAGE CONFIG
+# PAGE CONFIG + THEME
 # --------------------------------------------------
-st.set_page_config(
-    page_title="Customer Health Control Room",
-    layout="wide",
-)
+st.set_page_config(page_title="Customer Health Control Room", layout="wide")
+
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.card {
+    background: white;
+    border-radius: 14px;
+    padding: 1.25rem;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+    margin-bottom: 1.25rem;
+}
+.section-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🚦 Customer Health Control Room")
-st.caption("Operational dashboard for Customer Success teams")
+st.caption("Executive-grade Customer Success intelligence")
 
 
 # --------------------------------------------------
 # DATA SOURCE
 # --------------------------------------------------
-st.subheader("Data Source")
+mode = st.radio("Data source:", ["Use sample data", "Upload CSV"])
 
-data_mode = st.radio(
-    "Choose how to load customer data:",
-    ["Upload CSV", "Use sample data"],
-)
-
-if data_mode == "Upload CSV":
-    uploaded_file = st.file_uploader(
-        "Upload customer data (.csv)",
-        type=["csv"],
-    )
-
-    if not uploaded_file:
-        st.info("Please upload a customer CSV file to begin.")
+if mode == "Upload CSV":
+    uploaded = st.file_uploader("Upload customer CSV", type=["csv"])
+    if not uploaded:
         st.stop()
-
-    try:
-        df = pd.read_csv(uploaded_file)
-    except Exception as e:
-        st.error("Unable to read CSV file.")
-        st.code(str(e))
-        st.stop()
-
+    df = pd.read_csv(uploaded)
 else:
     df = generate_sample_data()
-    st.success("Sample customer data loaded.")
+    st.success("Sample data loaded")
 
 
 # --------------------------------------------------
-# SCHEMA VALIDATION
+# HEALTH + TRENDS
 # --------------------------------------------------
-REQUIRED_COLUMNS = [
-    "customer_name",
-    "usage_per_week",
-    "open_tickets",
-    "nps",
-    "days_since_login",
-    "contract_age_months",
-    "usage_prev_period",
-    "open_tickets_prev_period",
-    "nps_prev_period",
-    "renewal_date",
-    "contract_value",
-]
-
-missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
-
-if missing:
-    st.error("The following required columns are missing:")
-    st.write(missing)
-    st.stop()
-
-
-# --------------------------------------------------
-# HEALTH CALCULATION
-# --------------------------------------------------
-df[["health_score", "status", "reasons"]] = df.apply(
-    lambda row: pd.Series(calculate_health(row)),
-    axis=1,
+df[["health_score", "status"]] = df.apply(
+    lambda r: pd.Series(calculate_health(r)), axis=1
 )
 
-
 # --------------------------------------------------
-# KPI ROW
+# PORTFOLIO DONUT
 # --------------------------------------------------
-k1, k2, k3, k4 = st.columns(4)
+status_counts = df["status"].value_counts().reset_index()
+status_counts.columns = ["Status", "Count"]
 
-k1.metric("Healthy", len(df[df["status"] == "Green"]))
-k2.metric("At Risk", len(df[df["status"] == "Amber"]))
-k3.metric("Critical", len(df[df["status"] == "Red"]))
-k4.metric("Avg Health Score", round(df["health_score"].mean(), 1))
-
-st.divider()
-
-
-# --------------------------------------------------
-# SIDEBAR FILTERS
-# --------------------------------------------------
-st.sidebar.header("Filters")
-
-status_filter = st.sidebar.multiselect(
-    "Health status",
-    ["Green", "Amber", "Red"],
-    default=["Green", "Amber", "Red"],
+fig_portfolio = px.pie(
+    status_counts,
+    names="Status",
+    values="Count",
+    hole=0.6,
+    color="Status",
+    color_discrete_map={
+        "Green": "#2e7d32",
+        "Amber": "#f9a825",
+        "Red": "#c62828",
+    },
 )
 
-filtered_df = df[df["status"].isin(status_filter)]
+fig_portfolio.update_traces(textinfo="none")
+fig_portfolio.update_layout(height=280, margin=dict(t=0, b=0, l=0, r=0))
 
-if filtered_df.empty:
-    st.warning("No customers match the selected filters.")
-    st.stop()
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Portfolio Health</div>', unsafe_allow_html=True)
+st.plotly_chart(fig_portfolio, use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 # --------------------------------------------------
-# MAIN LAYOUT
+# CUSTOMER SELECTION
 # --------------------------------------------------
-left, right = st.columns([1, 2])
+customer_name = st.selectbox("Select customer", df["customer_name"])
+customer = df[df["customer_name"] == customer_name].iloc[0]
 
-with left:
-    st.subheader("Customers")
-    selected_customer = st.radio(
-        "",
-        filtered_df["customer_name"].tolist(),
-    )
-
-customer = df[df["customer_name"] == selected_customer].iloc[0]
+score, status = customer["health_score"], customer["status"]
+trends = calculate_trends(customer)
+renewal_days = days_to_renewal(customer)
+actions = recommend_actions(customer, score, renewal_days)
 
 
-with right:
-    st.subheader(f"Customer Overview: {selected_customer}")
+# --------------------------------------------------
+# MOMENTUM BAR
+# --------------------------------------------------
+trend_df = pd.DataFrame({
+    "Metric": ["Usage", "Support", "NPS"],
+    "Change": [trends["usage"], -trends["tickets"], trends["nps"]],
+})
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Health Score", int(customer["health_score"]))
-    c2.metric("Status", customer["status"])
-    c3.metric("NPS", int(customer["nps"]))
+fig_trends = px.bar(
+    trend_df,
+    x="Metric",
+    y="Change",
+    color="Change",
+    color_continuous_scale=["#c62828", "#f9a825", "#2e7d32"],
+)
 
-    st.markdown("### Key Signals")
-    st.write(f"Usage per week: {customer['usage_per_week']}")
-    st.write(f"Open tickets: {customer['open_tickets']}")
-    st.write(f"Days since last login: {customer['days_since_login']}")
-    st.write(f"Contract age (months): {customer['contract_age_months']}")
+fig_trends.update_layout(height=260, showlegend=False)
 
-    # --------------------------------------------------
-    # TRENDS
-    # --------------------------------------------------
-    trends = calculate_trends(customer)
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Momentum</div>', unsafe_allow_html=True)
+st.plotly_chart(fig_trends, use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("### Trends vs Previous Period")
-    st.write(f"Usage change: {trends['usage']:+}")
-    st.write(f"Ticket change: {trends['tickets']:+}")
-    st.write(f"NPS change: {trends['nps']:+}")
 
-    # --------------------------------------------------
-    # RENEWAL & ACTIONS
-    # --------------------------------------------------
-    renewal_days = days_to_renewal(customer)
-    renewal_status = renewal_risk_flag(customer, customer["health_score"])
+# --------------------------------------------------
+# CLIENT SUMMARY
+# --------------------------------------------------
+summary = generate_client_summary(customer, score, trends, renewal_days)
 
-    st.markdown("### Revenue Signals")
-    st.write(f"Days to renewal: {renewal_days}")
-    st.warning(renewal_status)
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Client Engagement Summary</div>', unsafe_allow_html=True)
+st.markdown(summary.replace("\n", "<br>"), unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-    actions = recommend_actions(
-        customer,
-        customer["health_score"],
-        renewal_days,
-    )
 
-    st.markdown("### Recommended Next Actions")
-    if actions:
-        for action in actions:
-            st.success(action)
-    else:
-        st.info("No immediate actions recommended.")
+# --------------------------------------------------
+# ACTIONS
+# --------------------------------------------------
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Recommended Focus Areas</div>', unsafe_allow_html=True)
+for a in actions:
+    st.markdown(f"• {a}")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # --------------------------------------------------
-    # CLIENT-FACING REPORT
-    # --------------------------------------------------
-    st.divider()
-    st.subheader("📄 Client-Facing Summary")
 
-    summary = generate_client_summary(
-        customer,
-        customer["health_score"],
-        trends,
-        renewal_days,
-    )
-    st.markdown(summary)
-
-    # Chart
-    fig, ax = plt.subplots()
-    ax.bar(
-        ["Usage", "Tickets", "Days Since Login"],
-        [
-            customer["usage_per_week"],
-            customer["open_tickets"],
-            customer["days_since_login"],
-        ],
-    )
-    ax.set_title("Engagement Overview")
-
-    buf = BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format="png")
-    buf.seek(0)
-    plt.close(fig)
-
-    st.image(buf, caption="Engagement Overview")
-
-    st.download_button(
-        "Download engagement chart",
-        data=buf,
-        file_name=f"{selected_customer}_engagement.png",
-        mime="image/png",
-    )
-
-    # --------------------------------------------------
-    # CLIENT EMAIL
-    # --------------------------------------------------
-    st.subheader("📧 Client Email Draft")
-
-    email_text = generate_email_draft(customer, summary)
-    st.text_area(
-        "Copy into email client:",
-        email_text,
-        height=260,
-    )
+# --------------------------------------------------
+# EMAIL
+# --------------------------------------------------
+email = generate_email_draft(customer, summary)
+st.text_area("Client email draft", email, height=220)
