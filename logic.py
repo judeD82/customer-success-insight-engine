@@ -1,32 +1,22 @@
 from datetime import datetime
 
 
-# --------------------------------------------------
+# -----------------------------
 # HEALTH SCORING
-# --------------------------------------------------
+# -----------------------------
 def calculate_health(customer):
     score = 100
-    reasons = []
 
     if customer["usage_per_week"] < 2:
         score -= 25
-        reasons.append("Low product usage")
-
     if customer["open_tickets"] > 5:
         score -= 20
-        reasons.append("High support ticket volume")
-
     if customer["nps"] < 6:
         score -= 20
-        reasons.append("Low NPS score")
-
     if customer["days_since_login"] > 14:
         score -= 15
-        reasons.append("No recent login activity")
-
     if customer["contract_age_months"] < 3:
         score -= 10
-        reasons.append("Early lifecycle customer")
 
     score = max(score, 0)
 
@@ -37,12 +27,12 @@ def calculate_health(customer):
     else:
         status = "Red"
 
-    return score, status, reasons
+    return score, status
 
 
-# --------------------------------------------------
-# TREND LOGIC
-# --------------------------------------------------
+# -----------------------------
+# TRENDS
+# -----------------------------
 def calculate_trends(customer):
     return {
         "usage": customer["usage_per_week"] - customer["usage_prev_period"],
@@ -51,32 +41,29 @@ def calculate_trends(customer):
     }
 
 
-# --------------------------------------------------
-# RENEWAL / REVENUE LOGIC
-# --------------------------------------------------
+# -----------------------------
+# RENEWALS
+# -----------------------------
 def days_to_renewal(customer):
     renewal_date = datetime.strptime(customer["renewal_date"], "%Y-%m-%d")
     return (renewal_date - datetime.today()).days
 
 
-def renewal_risk_flag(customer, health_score):
-    days = days_to_renewal(customer)
-
-    if days < 90 and health_score < 50:
+def renewal_flag(days, score):
+    if days < 90 and score < 50:
         return "High renewal risk"
-    elif days < 90:
+    if days < 90:
         return "Renewal approaching"
-    else:
-        return "No immediate renewal risk"
+    return "No immediate risk"
 
 
-# --------------------------------------------------
+# -----------------------------
 # ACTION ENGINE
-# --------------------------------------------------
-def recommend_actions(customer, health_score, renewal_days):
+# -----------------------------
+def recommend_actions(customer, score, renewal_days):
     actions = []
 
-    if health_score < 50:
+    if score < 50:
         actions.append("Schedule enablement session")
 
     if customer["usage_per_week"] < 2:
@@ -85,45 +72,44 @@ def recommend_actions(customer, health_score, renewal_days):
     if renewal_days < 90:
         actions.append("Prepare renewal alignment call")
 
-    if health_score > 75 and customer["nps"] > 8:
+    if score > 75 and customer["nps"] > 8:
         actions.append("Explore expansion opportunity")
 
     return actions
 
 
-# --------------------------------------------------
-# CLIENT-FACING NARRATIVE
-# --------------------------------------------------
-def generate_client_summary(customer, health_score, trends, renewal_days):
+# -----------------------------
+# CLIENT NARRATIVE
+# -----------------------------
+def generate_client_summary(customer, score, trends, renewal_days):
     intro = f"Here’s a snapshot of how things are currently tracking for **{customer['customer_name']}**."
 
-    if health_score >= 75:
+    if score >= 75:
         engagement = (
-            "Overall engagement is strong. Platform usage is consistent, and activity patterns "
-            "suggest the product is well embedded in day-to-day workflows."
+            "Overall engagement is strong. Platform usage is consistent and well embedded "
+            "in day-to-day workflows."
         )
-    elif health_score >= 50:
+    elif score >= 50:
         engagement = (
             "Engagement is steady, with clear signs of value being realised. "
-            "There are a few areas where we can help unlock additional benefit."
+            "There are opportunities to unlock additional benefit."
         )
     else:
         engagement = (
-            "Engagement has softened recently. This is often a sign that priorities have shifted, "
-            "and it’s a good moment to realign the platform to current needs."
+            "Engagement has softened recently, suggesting priorities may have shifted. "
+            "This is a good moment to realign the platform to current needs."
         )
 
     trend_notes = []
-
     if trends["usage"] > 0:
         trend_notes.append("Usage has increased compared to the previous period.")
     elif trends["usage"] < 0:
         trend_notes.append("Usage is slightly down compared to the previous period.")
 
-    if trends["tickets"] > 0:
-        trend_notes.append("Support activity has increased, which may indicate areas needing clarification.")
-    elif trends["tickets"] < 0:
-        trend_notes.append("Support volume has reduced, suggesting improved stability.")
+    if trends["tickets"] < 0:
+        trend_notes.append("Support volume has reduced, indicating improved stability.")
+    elif trends["tickets"] > 0:
+        trend_notes.append("Support activity has increased, highlighting areas to review.")
 
     trend_section = (
         " ".join(trend_notes)
@@ -133,17 +119,17 @@ def generate_client_summary(customer, health_score, trends, renewal_days):
 
     if renewal_days < 60:
         renewal = (
-            "With renewal approaching, this is a good time to ensure the platform is fully aligned "
-            "to your current goals and delivering maximum value."
+            "With renewal approaching, this is an ideal time to ensure the platform "
+            "is fully aligned to your goals and delivering maximum value."
         )
     elif renewal_days < 120:
         renewal = (
-            "As we move toward the next renewal window, we’ll continue to focus on strengthening "
+            "As we move toward the next renewal window, we’ll continue strengthening "
             "adoption and impact."
         )
     else:
         renewal = (
-            "At this stage in the contract, our focus remains on long-term value and continuous improvement."
+            "Our focus remains on long-term value and continuous improvement."
         )
 
     return f"""
@@ -165,13 +151,11 @@ def generate_email_draft(customer, summary):
 
 Hi {customer['customer_name']} team,
 
-I hope you’re well.
-
-I wanted to share a short overview of your recent platform engagement and a few observations from our side.
+I wanted to share a brief overview of your recent platform engagement and a few observations.
 
 {summary}
 
-If helpful, I’d be very happy to set up a short session to walk through this together and discuss next steps.
+If useful, I’d be very happy to set up a short session to walk through this together and discuss next steps.
 
 Best regards,  
 Customer Success Team
